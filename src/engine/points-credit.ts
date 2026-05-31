@@ -32,27 +32,27 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
  * rather than deriving points from a flat rate.
  */
 const TIERS: ReadonlyArray<{ lamports: number; credits: number }> = [
-  { lamports: Math.round(0.02 * LAMPORTS_PER_SOL), credits: 10 },
-  { lamports: Math.round(0.08 * LAMPORTS_PER_SOL), credits: 50 },
-  { lamports: Math.round(0.25 * LAMPORTS_PER_SOL), credits: 200 },
+    { lamports: Math.round(0.02 * LAMPORTS_PER_SOL), credits: 10 },
+    { lamports: Math.round(0.08 * LAMPORTS_PER_SOL), credits: 50 },
+    { lamports: Math.round(0.25 * LAMPORTS_PER_SOL), credits: 200 },
 ];
 
 const connection = new Connection(config.SOLANA_RPC_URL, "confirmed");
 
 export class PointsCreditError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode: 400 | 402 | 404 | 409 = 400
-  ) {
-    super(message);
-    this.name = "PointsCreditError";
-  }
+    constructor(
+        message: string,
+        readonly statusCode: 400 | 402 | 404 | 409 = 400
+    ) {
+        super(message);
+        this.name = "PointsCreditError";
+    }
 }
 
 export interface CreditResult {
-  points: number;
-  credited: number;
-  alreadyProcessed: boolean;
+    points: number;
+    credited: number;
+    alreadyProcessed: boolean;
 }
 
 /**
@@ -61,110 +61,110 @@ export interface CreditResult {
  * without double-crediting.
  */
 export async function verifyAndCreditPoints(params: {
-  txSignature: string;
-  followerWallet: string;
+    txSignature: string;
+    followerWallet: string;
 }): Promise<CreditResult> {
-  const { txSignature, followerWallet } = params;
+    const { txSignature, followerWallet } = params;
 
-  if (!config.DREAM_TREASURY_ADDRESS) {
-    throw new PointsCreditError("Treasury is not configured", 400);
-  }
+    if (!config.DREAM_TREASURY_ADDRESS) {
+        throw new PointsCreditError("Treasury is not configured", 400);
+    }
 
-  // 1. Replay guard — never credit the same signature twice.
-  const existing = await db
-    .select({ tx: pointPurchases.txSignature })
-    .from(pointPurchases)
-    .where(eq(pointPurchases.txSignature, txSignature))
-    .limit(1);
-  if (existing.length > 0) {
-    const points = await currentBalance(followerWallet);
-    return { points, credited: 0, alreadyProcessed: true };
-  }
+    // 1. Replay guard — never credit the same signature twice.
+    const existing = await db
+        .select({ tx: pointPurchases.txSignature })
+        .from(pointPurchases)
+        .where(eq(pointPurchases.txSignature, txSignature))
+        .limit(1);
+    if (existing.length > 0) {
+        const points = await currentBalance(followerWallet);
+        return { points, credited: 0, alreadyProcessed: true };
+    }
 
-  // 2. Validate the wallet inputs are real public keys before any RPC call.
-  let treasury: PublicKey;
-  let follower: PublicKey;
-  try {
-    treasury = new PublicKey(config.DREAM_TREASURY_ADDRESS);
-    follower = new PublicKey(followerWallet);
-  } catch {
-    throw new PointsCreditError("Invalid wallet address", 400);
-  }
+    // 2. Validate the wallet inputs are real public keys before any RPC call.
+    let treasury: PublicKey;
+    let follower: PublicKey;
+    try {
+        treasury = new PublicKey(config.DREAM_TREASURY_ADDRESS);
+        follower = new PublicKey(followerWallet);
+    } catch {
+        throw new PointsCreditError("Invalid wallet address", 400);
+    }
 
-  // 3. Fetch + verify the transaction on-chain.
-  const tx = await connection.getParsedTransaction(txSignature, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
-  if (!tx) {
-    throw new PointsCreditError("Transaction not found or not yet confirmed", 404);
-  }
-  if (tx.meta?.err) {
-    throw new PointsCreditError("Transaction failed on-chain", 402);
-  }
+    // 3. Fetch + verify the transaction on-chain.
+    const tx = await connection.getParsedTransaction(txSignature, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+    });
+    if (!tx) {
+        throw new PointsCreditError("Transaction not found or not yet confirmed", 404);
+    }
+    if (tx.meta?.err) {
+        throw new PointsCreditError("Transaction failed on-chain", 402);
+    }
 
-  // 4. Sum SOL transferred from the follower to the treasury.
-  const lamports = sumTransferLamports(tx, follower, treasury);
-  if (lamports <= 0) {
-    throw new PointsCreditError(
-      "No SOL transfer from this wallet to the treasury found in the transaction",
-      402
-    );
-  }
+    // 4. Sum SOL transferred from the follower to the treasury.
+    const lamports = sumTransferLamports(tx, follower, treasury);
+    if (lamports <= 0) {
+        throw new PointsCreditError(
+            "No SOL transfer from this wallet to the treasury found in the transaction",
+            402
+        );
+    }
 
-  // 5. Match the exact amount to a known tier.
-  const tier = TIERS.find((t) => t.lamports === lamports);
-  if (!tier) {
-    throw new PointsCreditError(
-      `Payment amount (${lamports} lamports) does not match any credit tier`,
-      402
-    );
-  }
+    // 5. Match the exact amount to a known tier.
+    const tier = TIERS.find((t) => t.lamports === lamports);
+    if (!tier) {
+        throw new PointsCreditError(
+            `Payment amount (${lamports} lamports) does not match any credit tier`,
+            402
+        );
+    }
 
-  // 6. Atomically record the purchase + credit the balance. The point_purchases
-  //    primary key is the final replay backstop against concurrent requests.
-  const points = await db.transaction(async (tx2) => {
-    await tx2.insert(pointPurchases).values({
-      txSignature,
-      followerWallet,
-      credits: tier.credits,
-      lamports,
+    // 6. Atomically record the purchase + credit the balance. The point_purchases
+    //    primary key is the final replay backstop against concurrent requests.
+    const points = await db.transaction(async (tx2) => {
+        await tx2.insert(pointPurchases).values({
+            txSignature,
+            followerWallet,
+            credits: tier.credits,
+            lamports,
+        });
+
+        const updated = await tx2
+            .update(followerWallets)
+            .set({
+                points: sql`${followerWallets.points} + ${tier.credits}`,
+                updatedAt: new Date(),
+            })
+            .where(eq(followerWallets.followerWallet, followerWallet))
+            .returning({ points: followerWallets.points });
+
+        if (updated.length === 0) {
+            // No follower row yet — they must register the signer first.
+            throw new PointsCreditError(
+                "No follower registration found. Enable copy trading first.",
+                404
+            );
+        }
+        return updated[0]!.points;
     });
 
-    const updated = await tx2
-      .update(followerWallets)
-      .set({
-        points: sql`${followerWallets.points} + ${tier.credits}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(followerWallets.followerWallet, followerWallet))
-      .returning({ points: followerWallets.points });
+    log.info(
+        { followerWallet, txSignature, lamports, credited: tier.credits, points },
+        "copy points credited from verified payment"
+    );
 
-    if (updated.length === 0) {
-      // No follower row yet — they must register the signer first.
-      throw new PointsCreditError(
-        "No follower registration found. Enable copy trading first.",
-        404
-      );
-    }
-    return updated[0]!.points;
-  });
-
-  log.info(
-    { followerWallet, txSignature, lamports, credited: tier.credits, points },
-    "copy points credited from verified payment"
-  );
-
-  return { points, credited: tier.credits, alreadyProcessed: false };
+    return { points, credited: tier.credits, alreadyProcessed: false };
 }
 
 async function currentBalance(followerWallet: string): Promise<number> {
-  const rows = await db
-    .select({ points: followerWallets.points })
-    .from(followerWallets)
-    .where(eq(followerWallets.followerWallet, followerWallet))
-    .limit(1);
-  return rows[0]?.points ?? 0;
+    const rows = await db
+        .select({ points: followerWallets.points })
+        .from(followerWallets)
+        .where(eq(followerWallets.followerWallet, followerWallet))
+        .limit(1);
+    return rows[0]?.points ?? 0;
 }
 
 /**
@@ -172,25 +172,25 @@ async function currentBalance(followerWallet: string): Promise<number> {
  * transfers in a parsed transaction.
  */
 function sumTransferLamports(
-  tx: NonNullable<Awaited<ReturnType<Connection["getParsedTransaction"]>>>,
-  source: PublicKey,
-  destination: PublicKey
+    tx: NonNullable<Awaited<ReturnType<Connection["getParsedTransaction"]>>>,
+    source: PublicKey,
+    destination: PublicKey
 ): number {
-  const src = source.toBase58();
-  const dest = destination.toBase58();
-  let total = 0;
+    const src = source.toBase58();
+    const dest = destination.toBase58();
+    let total = 0;
 
-  const instructions = tx.transaction.message.instructions;
-  for (const ix of instructions) {
-    if (!("parsed" in ix)) continue;
-    if (ix.program !== "system") continue;
-    const parsed = ix.parsed as { type?: string; info?: Record<string, unknown> };
-    if (parsed.type !== "transfer" && parsed.type !== "transferWithSeed") continue;
-    const info = parsed.info ?? {};
-    if (info.source !== src || info.destination !== dest) continue;
-    const lamports = Number(info.lamports ?? 0);
-    if (Number.isFinite(lamports) && lamports > 0) total += lamports;
-  }
+    const instructions = tx.transaction.message.instructions;
+    for (const ix of instructions) {
+        if (!("parsed" in ix)) continue;
+        if (ix.program !== "system") continue;
+        const parsed = ix.parsed as { type?: string; info?: Record<string, unknown> };
+        if (parsed.type !== "transfer" && parsed.type !== "transferWithSeed") continue;
+        const info = parsed.info ?? {};
+        if (info.source !== src || info.destination !== dest) continue;
+        const lamports = Number(info.lamports ?? 0);
+        if (Number.isFinite(lamports) && lamports > 0) total += lamports;
+    }
 
-  return total;
+    return total;
 }

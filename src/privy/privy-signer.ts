@@ -24,68 +24,68 @@ import { logger } from "../logger.js";
 const log = logger.child({ module: "privy-signer" });
 
 export class PrivyServerSigner {
-  private static instance: PrivyServerSigner | null = null;
+    private static instance: PrivyServerSigner | null = null;
 
-  private readonly client: PrivyClient;
-  private readonly authorizationKey: string;
+    private readonly client: PrivyClient;
+    private readonly authorizationKey: string;
 
-  private constructor() {
-    if (!config.PRIVY_APP_ID || !config.PRIVY_APP_SECRET) {
-      log.warn("Privy app credentials are not set — server signing will fail");
-    }
-    this.authorizationKey = config.PRIVY_AUTHORIZATION_KEY;
-    this.client = new PrivyClient(config.PRIVY_APP_ID, config.PRIVY_APP_SECRET, {
-      walletApi: {
-        authorizationPrivateKey: this.authorizationKey,
-      },
-    });
-  }
-
-  static getInstance(): PrivyServerSigner {
-    if (!PrivyServerSigner.instance) {
-      PrivyServerSigner.instance = new PrivyServerSigner();
-    }
-    return PrivyServerSigner.instance;
-  }
-
-  /** True when the signer has the credentials required to execute trades. */
-  get isConfigured(): boolean {
-    return Boolean(
-      config.PRIVY_APP_ID && config.PRIVY_APP_SECRET && this.authorizationKey
-    );
-  }
-
-  /**
-   * Sign and broadcast a Phoenix transaction with the user's embedded wallet.
-   *
-   * @param privyWalletId Privy wallet id of the follower's embedded wallet.
-   * @param transaction   A fully-built (unsigned) VersionedTransaction.
-   * @returns The broadcast transaction signature.
-   */
-  async signAndSendTransaction(
-    privyWalletId: string,
-    transaction: VersionedTransaction
-  ): Promise<string> {
-    if (!this.isConfigured) {
-      throw new Error(
-        "PrivyServerSigner is not configured (missing app id/secret/authorization key)"
-      );
+    private constructor() {
+        if (!config.PRIVY_APP_ID || !config.PRIVY_APP_SECRET) {
+            log.warn("Privy app credentials are not set — server signing will fail");
+        }
+        this.authorizationKey = config.PRIVY_AUTHORIZATION_KEY;
+        this.client = new PrivyClient(config.PRIVY_APP_ID, config.PRIVY_APP_SECRET, {
+            walletApi: {
+                authorizationPrivateKey: this.authorizationKey,
+            },
+        });
     }
 
-    const result = await this.client.walletApi.solana.signAndSendTransaction({
-      walletId: privyWalletId,
-      caip2: config.SOLANA_CAIP2 as SolanaCaip2ChainId,
-      transaction,
-    });
-
-    const signature = (result as { hash?: string; signature?: string; data?: { hash?: string } }).hash ??
-      (result as { signature?: string }).signature ??
-      (result as { data?: { hash?: string } }).data?.hash;
-    if (!signature) {
-      throw new Error("Privy did not return a transaction signature");
+    static getInstance(): PrivyServerSigner {
+        if (!PrivyServerSigner.instance) {
+            PrivyServerSigner.instance = new PrivyServerSigner();
+        }
+        return PrivyServerSigner.instance;
     }
-    return signature;
-  }
+
+    /** True when the signer has the credentials required to execute trades. */
+    get isConfigured(): boolean {
+        return Boolean(
+            config.PRIVY_APP_ID && config.PRIVY_APP_SECRET && this.authorizationKey
+        );
+    }
+
+    /**
+     * Sign and broadcast a Phoenix transaction with the user's embedded wallet.
+     *
+     * @param privyWalletId Privy wallet id of the follower's embedded wallet.
+     * @param transaction   A fully-built (unsigned) VersionedTransaction.
+     * @returns The broadcast transaction signature.
+     */
+    async signAndSendTransaction(
+        privyWalletId: string,
+        transaction: VersionedTransaction
+    ): Promise<string> {
+        if (!this.isConfigured) {
+            throw new Error(
+                "PrivyServerSigner is not configured (missing app id/secret/authorization key)"
+            );
+        }
+
+        const result = await this.client.walletApi.solana.signAndSendTransaction({
+            walletId: privyWalletId,
+            caip2: config.SOLANA_CAIP2 as SolanaCaip2ChainId,
+            transaction,
+        });
+
+        const signature = (result as { hash?: string; signature?: string; data?: { hash?: string } }).hash ??
+            (result as { signature?: string }).signature ??
+            (result as { data?: { hash?: string } }).data?.hash;
+        if (!signature) {
+            throw new Error("Privy did not return a transaction signature");
+        }
+        return signature;
+    }
 }
 
 export const privySigner = PrivyServerSigner.getInstance();
