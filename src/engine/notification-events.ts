@@ -49,6 +49,10 @@ function formatUsd(amount: number): string {
     return amount >= 100 ? `$${amount.toFixed(0)}` : `$${amount.toFixed(2)}`;
 }
 
+function normalizeHeaderSecret(value: string): string {
+    return value.replace(/\s+/g, "");
+}
+
 function buildCopyEvent(input: CopyExecutionNotification): NotificationEventRow {
     const sideLabel = input.leaderSide === "long" ? "Long" : "Short";
     const symbol = baseSymbol(input.market);
@@ -133,6 +137,15 @@ export async function enqueueCopyExecutionNotification(
             return;
         }
 
+        log.info(
+            {
+                followerWallet: input.followerWallet,
+                market: input.market,
+                changeType: input.changeType,
+            },
+            "copy notification enqueued"
+        );
+
         await triggerCopyNotificationDispatch({
             followerWallet: input.followerWallet,
             market: input.market,
@@ -156,8 +169,9 @@ async function triggerCopyNotificationDispatch(input: {
             "Content-Type": "application/json",
         };
 
-        if (config.NOTIFICATION_DISPATCH_SECRET) {
-            headers["x-webhook-secret"] = config.NOTIFICATION_DISPATCH_SECRET;
+        const dispatchSecret = normalizeHeaderSecret(config.NOTIFICATION_DISPATCH_SECRET);
+        if (dispatchSecret) {
+            headers["x-webhook-secret"] = dispatchSecret;
         }
 
         const response = await fetch(dispatchFunctionUrl(), {
@@ -177,7 +191,18 @@ async function triggerCopyNotificationDispatch(input: {
                 },
                 "copy notification dispatch trigger failed"
             );
+            return;
         }
+
+        const responseText = await response.text();
+        log.info(
+            {
+                followerWallet: input.followerWallet,
+                market: input.market,
+                response: responseText,
+            },
+            "copy notification dispatch triggered"
+        );
     } catch (err) {
         log.warn(
             { err, followerWallet: input.followerWallet, market: input.market },
