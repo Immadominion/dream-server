@@ -38,6 +38,7 @@ import {
 } from "../phoenix/types.js";
 import { recordCopyAttribution } from "./attribution.js";
 import { detectPositionChanges, type PositionChange } from "./diff.js";
+import { enqueueCopyExecutionNotification } from "./notification-events.js";
 
 const log = logger.child({ module: "copy-orchestrator" });
 
@@ -164,24 +165,51 @@ export class CopyOrchestrator {
         const follower = subscription.followerWallet;
 
         if (change.type === "closed") {
+            // The follower's position size differs from the leader's (it was
+            // opened with a fixed copyUSDC amount). Fetch the follower's actual
+            // position to get the right sizeBase; skip if already gone.
+            const followerPositions = await fetchLeaderPositions(subscription.followerWallet);
+            const followerPos = followerPositions.find(
+                (p) => p.market === change.market && p.side === change.side
+            );
+            if (!followerPos) {
+                log.info(
+                    { follower: subscription.followerWallet, market: change.market },
+                    "follower position already closed — skipping mirror close"
+                );
+                return;
+            }
+
             const result = await closePosition({
                 privyWalletId: subscription.privyWalletId,
                 authority: subscription.followerWallet,
                 symbol: change.market,
                 positionSide: change.side,
-                sizeBase: change.position.size,
+                sizeBase: followerPos.size,
             });
 
             await this.recordExecution({
                 subscription,
                 change,
                 side: change.side === "long" ? "sell" : "buy",
-                quantity: change.position.size,
+                quantity: followerPos.size,
                 notionalUsdc: 0,
                 success: result.success,
                 txSignature: result.txSignature,
                 error: result.error,
             });
+
+            if (result.success && result.txSignature) {
+                await enqueueCopyExecutionNotification({
+                    followerWallet: subscription.followerWallet,
+                    leaderWallet: subscription.leaderWallet,
+                    market: change.market,
+                    leaderSide: change.side,
+                    changeType: "closed",
+                    notionalUsdc: 0,
+                    txSignature: result.txSignature,
+                });
+            }
             return;
         }
 
@@ -255,6 +283,18 @@ export class CopyOrchestrator {
             notionalUsdc: settings.copyUSDC,
             eventType: change.type,
         });
+
+        if (result.txSignature) {
+            await enqueueCopyExecutionNotification({
+                followerWallet: subscription.followerWallet,
+                leaderWallet: subscription.leaderWallet,
+                market: change.market,
+                leaderSide: change.side,
+                changeType: change.type,
+                notionalUsdc: settings.copyUSDC,
+                txSignature: result.txSignature,
+            });
+        }
     }
 
     private async recordExecution(params: {

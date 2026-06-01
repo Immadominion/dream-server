@@ -44,6 +44,12 @@ const envSchema = z.object({
     LEADER_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(6000),
     DREAM_WORKER_URL: z.string().default(""),
 
+    // Optional Supabase admin credentials used to enqueue copy-trade push
+    // notifications into Dream's existing notification backend.
+    SUPABASE_URL: z.string().default(""),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().default(""),
+    NOTIFICATION_DISPATCH_SECRET: z.string().default(""),
+
     // Treasury wallet that receives SOL micropayments for copy-point top-ups.
     // The credit route verifies on-chain that the payment landed here before
     // crediting Postgres points.
@@ -103,6 +109,11 @@ if (parsed.data.NODE_ENV === "production") {
     }
     if (parsed.data.SOLANA_RPC_URL.includes("api.mainnet-beta.solana.com")) {
         warnings.push("SOLANA_RPC_URL is a public endpoint — use Helius/Triton for reliability");
+    }
+    if (!parsed.data.SUPABASE_URL || !parsed.data.SUPABASE_SERVICE_ROLE_KEY) {
+        warnings.push(
+            "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY unset — mirrored copy-trade push notifications are disabled"
+        );
     }
 
     for (const w of warnings) console.warn(`⚠️  ${w}`);
