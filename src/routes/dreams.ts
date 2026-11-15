@@ -81,7 +81,12 @@ const log = logger.child({ module: "dreams" });
 
 const MAX_PENDING_LAUNCHES_PER_DREAM = 5;
 const RECENT_SUPPORTERS = 20;
-/** A reporter is credible once they've put at least this much into any dream. */
+/**
+ * A report counts toward auto-hiding only if the reporter funded *this* dream
+ * with at least this much. Credibility from any other dream is sybil-able
+ * (an attacker funds their own second dream and gets the money back); here,
+ * hiding a dream costs the attacker money that goes to the victim.
+ */
 const CREDIBLE_REPORTER_MIN_MICRO = 1_000_000n; // $1
 
 const MINUTE = 60_000;
@@ -250,11 +255,11 @@ async function reconcileLaunches(dream: DreamRow): Promise<DreamRow> {
     return current;
 }
 
-async function isCredibleReporter(wallet: string): Promise<boolean> {
+async function isCredibleReporter(wallet: string, dreamId: string): Promise<boolean> {
     const [row] = await db
         .select({ total: sql<string>`coalesce(sum(${dreamContributions.amountUsdcMicro}), 0)::text` })
         .from(dreamContributions)
-        .where(eq(dreamContributions.contributorWallet, wallet));
+        .where(and(eq(dreamContributions.contributorWallet, wallet), eq(dreamContributions.dreamId, dreamId)));
     return BigInt(row?.total ?? "0") >= CREDIBLE_REPORTER_MIN_MICRO;
 }
 
@@ -343,7 +348,12 @@ app.get("/coins/:mint/metadata.json", rateLimit("dreams:meta", { windowMs: MINUT
     if (!row) return c.json({ error: "Not found" }, 404);
 
     const dreamUrl = `https://trydream.fun/d/${row.dream.id}`;
-    const official = row.launch.status === "confirmed" || row.launch.status === "pending";
+    // Official = the dream's attached coin, or a pending launch while the
+    // dream has no coin yet. Anything else (orphaned/invalid, or pending after
+    // a different mint won) is labelled unofficial.
+    const official =
+        row.dream.coinMint === mint ||
+        (row.launch.status === "pending" && row.dream.coinMint === null);
     // Metadata is fetched live by wallets/explorers, so it can reflect the
     // dream's current state even though the URI itself is immutable.
     const description = !official
@@ -599,8 +609,8 @@ app.post(
     }
 );
 
-// POST /v1/dreams/:id/report — anyone can report; only reporters who have
-// funded a dream count toward auto-hiding, so free wallets can't bury dreams.
+// POST /v1/dreams/:id/report — anyone can report (the operator is alerted);
+// only reporters who funded this dream count toward auto-hiding it.
 app.post(
     "/:id/report",
     dreamAuth,
@@ -613,7 +623,7 @@ app.post(
         if (!dream) return c.json({ error: "Dream not found" }, 404);
         if (dream.ownerWallet === reporter) return c.json({ error: "You can't report your own dream" }, 400);
 
-        const credible = await isCredibleReporter(reporter);
+        const credible = await isCredibleReporter(reporter, dream.id);
         const result = await db.transaction(async (trx) => {
             const inserted = await trx
                 .insert(dreamReports)

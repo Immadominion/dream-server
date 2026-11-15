@@ -100,6 +100,9 @@ const envSchema = z.object({
     DREAM_SESSION_SECRET: z.string().default(""),
     // Operator token for moderation endpoints (hide/unhide). Empty disables them.
     ADMIN_API_TOKEN: z.string().default(""),
+    // Reverse proxies in front of the server that append to X-Forwarded-For
+    // (Railway's edge = 1). Used to find the real client IP for rate limits.
+    TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
 });
 
 const parsed = envSchema.safeParse(process.env);

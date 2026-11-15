@@ -11,6 +11,7 @@
 
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import config from "../config.js";
 
 interface Window {
     count: number;
@@ -26,10 +27,19 @@ function sweep(now: number): void {
     for (const [key, w] of windows) if (w.resetAt <= now) windows.delete(key);
 }
 
-export function clientIp(c: Context): string {
-    // Railway terminates TLS and appends the client IP; take the first hop.
-    const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-    return forwarded || c.req.header("x-real-ip") || "unknown";
+/**
+ * The client IP as seen by our trusted proxy. Clients can put anything in
+ * X-Forwarded-For; proxies *append*. With N trusted proxy hops (Railway's
+ * edge = 1) the real client is the N-th entry from the right — never the
+ * left-most, which is attacker-controlled.
+ */
+export function clientIp(c: Context, trustedHops = config.TRUSTED_PROXY_HOPS): string {
+    const hops = (c.req.header("x-forwarded-for") ?? "")
+        .split(",")
+        .map((h) => h.trim())
+        .filter(Boolean);
+    if (trustedHops > 0 && hops.length >= trustedHops) return hops[hops.length - trustedHops]!;
+    return "unknown";
 }
 
 function hit(key: string, limit: number, windowMs: number, now: number): number | null {
