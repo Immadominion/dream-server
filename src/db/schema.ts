@@ -30,6 +30,7 @@ import {
     uniqueIndex,
     primaryKey,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // ═══════════════════════════════════════════════════════════════
 // follower_wallets
@@ -265,3 +266,146 @@ export const broadcasterPayouts = pgTable(
 );
 
 export type BroadcasterPayoutRow = typeof broadcasterPayouts.$inferSelect;
+
+// ═══════════════════════════════════════════════════════════════
+// Dreams (V2)
+// ═══════════════════════════════════════════════════════════════
+//
+// A "dream" is a real need posted by the person who has it. Supporters fund
+// it wallet-to-wallet in USDC (Dream never custodies funds; the server only
+// verifies the transfer on-chain and records it) and/or trade the dream's
+// coin, whose creator trading fees accrue to the dream owner on Meteora DBC.
+//
+// Money is stored as integer micro-USDC (6 decimals) — never floats.
+
+/** open → funded (goal reached, still accepts support) → closed (owner ended it). */
+export const DREAM_STATUSES = ["open", "funded", "closed"] as const;
+export type DreamStatus = (typeof DREAM_STATUSES)[number];
+
+export const DREAM_CATEGORIES = [
+    "medical",
+    "education",
+    "rent",
+    "food",
+    "business",
+    "family",
+    "emergency",
+    "other",
+] as const;
+export type DreamCategory = (typeof DREAM_CATEGORIES)[number];
+
+export const dreams = pgTable(
+    "dreams",
+    {
+        id: text("id").primaryKey(),
+        /** Wallet of the person with the need — the only beneficiary. */
+        ownerWallet: text("owner_wallet").notNull(),
+        title: text("title").notNull(),
+        story: text("story").notNull(),
+        category: text("category").$type<DreamCategory>().notNull(),
+        goalUsdcMicro: bigint("goal_usdc_micro", { mode: "bigint" }).notNull(),
+        /** Denormalized sum of verified contributions. */
+        raisedUsdcMicro: bigint("raised_usdc_micro", { mode: "bigint" })
+            .notNull()
+            .default(sql`0`),
+        supporterCount: integer("supporter_count").notNull().default(0),
+        status: text("status").$type<DreamStatus>().notNull().default("open"),
+        /** The owner's own X post — only set after ownership is verified. */
+        xPostUrl: text("x_post_url"),
+        /** Verified X handle of the owner (from the verified post). */
+        xHandle: text("x_handle"),
+        /** Hidden from public listings (moderation). Owner still sees it. */
+        hidden: boolean("hidden").notNull().default(false),
+        reportCount: integer("report_count").notNull().default(0),
+        /** Set once the dream's coin launch is verified on-chain. */
+        coinMint: text("coin_mint"),
+        coinPool: text("coin_pool"),
+        coinSymbol: text("coin_symbol"),
+        coinLaunchedAt: timestamp("coin_launched_at", { withTimezone: true }),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+        updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => [
+        index("dreams_owner_idx").on(t.ownerWallet),
+        index("dreams_feed_idx").on(t.hidden, t.status, t.createdAt),
+        uniqueIndex("dreams_coin_mint_uq").on(t.coinMint),
+    ]
+);
+
+export type DreamRow = typeof dreams.$inferSelect;
+export type NewDream = typeof dreams.$inferInsert;
+
+/**
+ * Append-only ledger of verified wallet-to-wallet USDC contributions. Keyed
+ * by tx signature so one transfer can never be counted twice.
+ */
+export const dreamContributions = pgTable(
+    "dream_contributions",
+    {
+        txSignature: text("tx_signature").primaryKey(),
+        dreamId: text("dream_id")
+            .notNull()
+            .references(() => dreams.id),
+        contributorWallet: text("contributor_wallet").notNull(),
+        amountUsdcMicro: bigint("amount_usdc_micro", { mode: "bigint" }).notNull(),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => [
+        index("dream_contrib_dream_idx").on(t.dreamId, t.createdAt),
+        index("dream_contrib_wallet_idx").on(t.contributorWallet),
+    ]
+);
+
+export type DreamContributionRow = typeof dreamContributions.$inferSelect;
+
+/** One report per (dream, reporter). Crossing the threshold hides the dream. */
+export const dreamReports = pgTable(
+    "dream_reports",
+    {
+        dreamId: text("dream_id")
+            .notNull()
+            .references(() => dreams.id),
+        reporterWallet: text("reporter_wallet").notNull(),
+        reason: text("reason").notNull(),
+        /**
+         * Whether this reporter had skin in the game (a verified contribution)
+         * when reporting. Only credible reports count toward auto-hiding, so
+         * free throwaway wallets can't bury legitimate dreams.
+         */
+        credible: boolean("credible").notNull().default(false),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => [primaryKey({ columns: [t.dreamId, t.reporterWallet] })]
+);
+
+/**
+ * Coin launches prepared by the server and awaiting the owner's signature.
+ * The mint keypair is single-use and never stored — only its public key.
+ * A launch is confirmed only after the pool is verified on-chain.
+ */
+export const dreamCoinLaunches = pgTable(
+    "dream_coin_launches",
+    {
+        mint: text("mint").primaryKey(),
+        dreamId: text("dream_id")
+            .notNull()
+            .references(() => dreams.id),
+        pool: text("pool").notNull(),
+        name: text("name").notNull(),
+        symbol: text("symbol").notNull(),
+        /**
+         * pending   — built, awaiting signature
+         * confirmed — verified on-chain and attached to the dream
+         * orphaned  — landed on-chain after another launch won (not official)
+         * invalid   — on-chain pool failed verification (never attached)
+         */
+        status: text("status").notNull().default("pending"),
+        /** Block height after which the prepared tx can no longer land. */
+        lastValidBlockHeight: bigint("last_valid_block_height", { mode: "number" }),
+        txSignature: text("tx_signature"),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => [index("dream_coin_launch_dream_idx").on(t.dreamId)]
+);
+
+export type DreamCoinLaunchRow = typeof dreamCoinLaunches.$inferSelect;

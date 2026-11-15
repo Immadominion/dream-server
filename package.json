@@ -13,7 +13,9 @@
         "db:migrate": "drizzle-kit migrate",
         "db:studio": "drizzle-kit studio",
         "policy:update": "tsx scripts/update-signer-policy.ts",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "dbc:create-config": "tsx scripts/create-dream-dbc-config.ts"
     },
     "keywords": [
         "solana",
@@ -27,8 +29,10 @@
     "dependencies": {
         "@hono/node-server": "^1.19.9",
         "@hono/zod-validator": "^0.7.6",
+        "@meteora-ag/dynamic-bonding-curve-sdk": "2.0.0",
         "@privy-io/server-auth": "^1.21.0",
         "@solana/web3.js": "^1.98.4",
+        "bn.js": "^5.2.5",
         "bs58": "^6.0.0",
         "dotenv": "^16.6.1",
         "drizzle-orm": "^0.45.1",
@@ -40,11 +44,14 @@
         "zod": "^3.25.76"
     },
     "devDependencies": {
+        "@solana/spl-token": "^0.4.15",
+        "@types/bn.js": "^5.2.0",
         "@types/node": "^22.19.12",
         "@types/pg": "^8.18.0",
         "drizzle-kit": "^0.31.9",
         "tsx": "^4.21.0",
-        "typescript": "^5.9.3"
+        "typescript": "^5.9.3",
+        "vitest": "^3.2.7"
     },
     "overrides": {
         "uuid": "^9.0.1"

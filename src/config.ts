@@ -66,6 +66,40 @@ const envSchema = z.object({
     BUILDER_FEE_BPS: z.coerce.number().int().min(0).max(10000).default(10),
     BROADCASTER_SHARE_BPS: z.coerce.number().int().min(0).max(10000).default(3000),
     PAYOUT_MIN_USD: z.coerce.number().default(5),
+
+    // ── Copy trading (V1, retired in V2) ────────────────────────────────
+    // The always-on copy engine and its routes only run when explicitly
+    // enabled. V2 ships with it off; flip to "true" to bring it back.
+    COPY_ENGINE_ENABLED: z
+        .enum(["true", "false"])
+        .default("false")
+        .transform((v) => v === "true"),
+
+    // ── Dreams (V2) ─────────────────────────────────────────────────────
+    // Public origin this server is reachable at. Coin metadata URIs are
+    // written on-chain and are immutable, so this must be a stable domain
+    // you control (e.g. https://api.trydream.fun), not a Railway hostname.
+    PUBLIC_BASE_URL: z.string().url().default("http://localhost:3002"),
+    USDC_MINT: z.string().default("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+    // Meteora DBC config account created by scripts/create-dream-dbc-config.ts.
+    // Empty disables coin launches (the rest of Dreams still works).
+    DREAM_DBC_CONFIG: z.string().default(""),
+    // Default coin image when a dream has none (must be a permanent URL).
+    DREAM_COIN_IMAGE_URL: z.string().url().default("https://trydream.fun/coin.png"),
+    // Priority fee for server-built transactions (micro-lamports per CU).
+    PRIORITY_FEE_MICROLAMPORTS: z.coerce.number().int().min(0).default(50_000),
+    // A dream is hidden from the public feed once this many distinct
+    // wallets report it, pending manual review.
+    DREAM_REPORT_HIDE_THRESHOLD: z.coerce.number().int().min(1).default(5),
+    // Max simultaneously open dreams per wallet (anti-spam).
+    DREAM_MAX_OPEN_PER_WALLET: z.coerce.number().int().min(1).default(3),
+    // A prepared launch older than this has an expired blockhash: it either
+    // landed already or never will, so it gets reconciled against the chain.
+    DREAM_STALE_LAUNCH_SECONDS: z.coerce.number().int().min(1).default(180),
+    // HMAC secret for Dreams session tokens (≥32 chars). Required in production.
+    DREAM_SESSION_SECRET: z.string().default(""),
+    // Operator token for moderation endpoints (hide/unhide). Empty disables them.
+    ADMIN_API_TOKEN: z.string().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -86,15 +120,16 @@ if (parsed.data.NODE_ENV === "production") {
     ) {
         errors.push("DATABASE_URL points to localhost — set your production Postgres URL");
     }
-    if (!parsed.data.PRIVY_APP_ID || !parsed.data.PRIVY_APP_SECRET) {
+    const copyEnabled = parsed.data.COPY_ENGINE_ENABLED;
+    if (copyEnabled && (!parsed.data.PRIVY_APP_ID || !parsed.data.PRIVY_APP_SECRET)) {
         errors.push("PRIVY_APP_ID / PRIVY_APP_SECRET are required to sign server-side");
     }
-    if (!parsed.data.PRIVY_AUTHORIZATION_KEY) {
+    if (copyEnabled && !parsed.data.PRIVY_AUTHORIZATION_KEY) {
         errors.push(
             "PRIVY_AUTHORIZATION_KEY is required — the always-on signer cannot execute without it"
         );
     }
-    if (!parsed.data.PRIVY_SIGNER_ID) {
+    if (copyEnabled && !parsed.data.PRIVY_SIGNER_ID) {
         errors.push(
             "PRIVY_SIGNER_ID is required — clients cannot attach the server signer without it"
         );
@@ -114,6 +149,24 @@ if (parsed.data.NODE_ENV === "production") {
         warnings.push(
             "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY unset — mirrored copy-trade push notifications are disabled"
         );
+    }
+
+    if (parsed.data.PUBLIC_BASE_URL.includes("localhost")) {
+        errors.push("PUBLIC_BASE_URL is localhost — coin metadata URIs would be unreachable");
+    }
+    if (parsed.data.PUBLIC_BASE_URL.includes(".up.railway.app")) {
+        warnings.push(
+            "PUBLIC_BASE_URL is a Railway hostname — coin metadata URIs are permanent; use your own domain"
+        );
+    }
+    if (parsed.data.DREAM_SESSION_SECRET.length < 32) {
+        errors.push("DREAM_SESSION_SECRET must be set (≥32 random chars) — Dreams auth tokens depend on it");
+    }
+    if (parsed.data.ADMIN_API_TOKEN && parsed.data.ADMIN_API_TOKEN.length < 32) {
+        errors.push("ADMIN_API_TOKEN must be ≥32 random chars when set");
+    }
+    if (!parsed.data.DREAM_DBC_CONFIG) {
+        warnings.push("DREAM_DBC_CONFIG unset — dream coin launches are disabled");
     }
 
     for (const w of warnings) console.warn(`⚠️  ${w}`);

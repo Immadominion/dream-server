@@ -15,6 +15,13 @@
       "when": 1780256179582,
       "tag": "0001_glorious_aaron_stack",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794707615885,
+      "tag": "0002_dreams_v2",
+      "breakpoints": true
     }
   ]
 }

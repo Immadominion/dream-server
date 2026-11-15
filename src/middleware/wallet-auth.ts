@@ -46,7 +46,15 @@ export const walletAuth = createMiddleware<WalletAuthEnv>(async (c, next) => {
     }
 
     const message = new TextEncoder().encode(`dream-ai:${address}:${timestamp}`);
-    const valid = nacl.sign.detached.verify(message, signatureBytes, pubkeyBytes);
+    let valid = false;
+    try {
+        valid =
+            pubkeyBytes.length === 32 &&
+            signatureBytes.length === 64 &&
+            nacl.sign.detached.verify(message, signatureBytes, pubkeyBytes);
+    } catch {
+        valid = false;
+    }
     if (!valid) {
         return c.json({ error: "Signature verification failed" }, 401);
     }

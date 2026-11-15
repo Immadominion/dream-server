@@ -1,6 +1,7 @@
 /** Simple app-wide error handler for Hono. */
 
 import type { Context } from "hono";
+import config from "../config.js";
 import { logger } from "../logger.js";
 
 export function errorHandler(err: Error, c: Context): Response {
@@ -8,7 +9,8 @@ export function errorHandler(err: Error, c: Context): Response {
     return c.json(
         {
             error: "Internal server error",
-            message: err.message,
+            // Internal details only outside production.
+            ...(config.NODE_ENV === "production" ? {} : { message: err.message }),
         },
         500
     );

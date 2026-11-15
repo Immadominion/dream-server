@@ -4,9 +4,9 @@
  * Hono on Node.js server providing the always-on copy-trading backend.
  *
  * Responsibilities:
- *  - Persist signer registrations + copy subscriptions
- *  - Run the background Phoenix leader watcher / copy orchestrator
- *  - Sign Phoenix transactions server-side through Privy authorization keys
+ *  - Dreams (V2): needs feed, verified USDC contributions, Meteora DBC coins
+ *  - Analytics / Telegram relay
+ *  - Copy trading (V1, retired): only when COPY_ENGINE_ENABLED=true
  */
 
 process.stdout.write(`[boot] dream-server starting (pid=${process.pid}, node=${process.version})\n`);
@@ -32,6 +32,7 @@ import { orchestrator } from "./engine/orchestrator.js";
 import { errorHandler } from "./middleware/error.js";
 import { logger } from "./logger.js";
 import copyRoutes from "./routes/copy.js";
+import dreamsRoutes from "./routes/dreams.js";
 import healthRoutes from "./routes/health.js";
 import { broadcastersPublic, broadcastersAuth } from "./routes/broadcasters.js";
 import { analyticsRoutes, telegramRoutes } from "./routes/analytics.js";
@@ -59,19 +60,23 @@ app.use(
     cors({
         origin: parseCorsOrigins(config.CORS_ORIGINS),
         allowHeaders: [
+            "Authorization",
             "Content-Type",
             "X-Wallet-Address",
             "X-Wallet-Signature",
             "X-Timestamp",
         ],
-        allowMethods: ["GET", "POST", "OPTIONS"],
+        allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
     })
 );
 
 app.route("/health", healthRoutes);
-app.route("/v1/copy", copyRoutes);
-app.route("/v1/broadcasters", broadcastersPublic);
-app.route("/v1/broadcasters", broadcastersAuth);
+app.route("/v1/dreams", dreamsRoutes);
+if (config.COPY_ENGINE_ENABLED) {
+    app.route("/v1/copy", copyRoutes);
+    app.route("/v1/broadcasters", broadcastersPublic);
+    app.route("/v1/broadcasters", broadcastersAuth);
+}
 app.route("/v1/analytics", analyticsRoutes);
 app.route("/v1/telegram", telegramRoutes);
 
@@ -89,7 +94,7 @@ async function bootstrap(): Promise<void> {
     process.stdout.write(`[boot] server listening on :${config.PORT}\n`);
 
     const shutdown = async (): Promise<void> => {
-        orchestrator.stop();
+        if (config.COPY_ENGINE_ENABLED) orchestrator.stop();
         await closeDatabase();
         server.close();
     };
@@ -105,8 +110,10 @@ async function bootstrap(): Promise<void> {
     // the platform restarts the container rather than serving a DB-less app.
     try {
         await runMigrations();
-        await orchestrator.start();
-        process.stdout.write(`[boot] migrations applied + orchestrator started\n`);
+        if (config.COPY_ENGINE_ENABLED) await orchestrator.start();
+        process.stdout.write(
+            `[boot] migrations applied; copy engine ${config.COPY_ENGINE_ENABLED ? "started" : "disabled"}\n`
+        );
     } catch (err) {
         process.stdout.write(
             `[boot] FATAL init error: ${err instanceof Error ? err.stack : String(err)}\n`
