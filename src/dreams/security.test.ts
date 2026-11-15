@@ -92,21 +92,21 @@ describe("rate limiting (M3)", () => {
         const call = (ip: string, wallet?: string) =>
             app.request("/x", { headers: { "x-forwarded-for": ip, ...(wallet ? { "x-wallet": wallet } : {}) } });
 
-        // Header = "<client-supplied>, <appended by proxy>"; the proxy's entry wins.
-        expect((await call("9.9.9.9, 1.1.1.1", "A")).status).toBe(200);
-        expect((await call("1.1.1.1", "A")).status).toBe(200);
-        expect((await call("1.1.1.1", "A")).status).toBe(429); // wallet limit
-        expect((await call("2.2.2.2")).status).toBe(200);
-        expect((await call("2.2.2.2")).status).toBe(200);
-        expect((await call("2.2.2.2")).status).toBe(200);
-        expect((await call("2.2.2.2")).status).toBe(429); // IP limit
+        // Header = "<spoofed>, <client>, <edge>"; the client entry wins.
+        expect((await call("9.9.9.9, 1.1.1.1, 100.64.0.1", "A")).status).toBe(200);
+        expect((await call("1.1.1.1, 100.64.0.2", "A")).status).toBe(200);
+        expect((await call("1.1.1.1, 100.64.0.3", "A")).status).toBe(429); // wallet limit
+        expect((await call("2.2.2.2, 100.64.0.1")).status).toBe(200);
+        expect((await call("2.2.2.2, 100.64.0.2")).status).toBe(200);
+        expect((await call("2.2.2.2, 100.64.0.3")).status).toBe(200);
+        expect((await call("2.2.2.2, 100.64.0.4")).status).toBe(429); // IP limit, edge varies
     });
 
     it("can't be dodged by spoofing the left-most X-Forwarded-For entry", async () => {
         const app = new Hono().get("/x", rateLimit("spoof", { windowMs: 60_000, perIp: 2 }), (c) => c.text("ok"));
         const statuses = [];
         for (let i = 0; i < 3; i++) {
-            const res = await app.request("/x", { headers: { "x-forwarded-for": `10.0.0.${i}, 3.3.3.3` } });
+            const res = await app.request("/x", { headers: { "x-forwarded-for": `10.0.0.${i}, 3.3.3.3, 100.64.0.${i}` } });
             statuses.push(res.status);
         }
         expect(statuses).toEqual([200, 200, 429]);

@@ -74,7 +74,7 @@ import {
     issueSession,
     type DreamAuthEnv,
 } from "../middleware/dream-session.js";
-import { rateLimit } from "../middleware/rate-limit.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { sendTelegram } from "./analytics.js";
 
 const log = logger.child({ module: "dreams" });
@@ -659,6 +659,21 @@ app.post(
         return c.json({ ok: true });
     }
 );
+
+// GET /v1/dreams/_ops/ip — operator-only: shows the proxy headers the
+// platform sends, so TRUSTED_PROXY_HOPS / client-IP derivation can be checked.
+app.get("/_ops/ip", (c) => {
+    if (!isAdmin(c)) return c.json({ error: "Not found" }, 404);
+    const pick = (h: string) => c.req.header(h) ?? null;
+    return c.json({
+        derived: clientIp(c),
+        xForwardedFor: pick("x-forwarded-for"),
+        xRealIp: pick("x-real-ip"),
+        xEnvoyExternalAddress: pick("x-envoy-external-address"),
+        cfConnectingIp: pick("cf-connecting-ip"),
+        forwarded: pick("forwarded"),
+    });
+});
 
 // POST /v1/dreams/:id/moderation — operator hide/unhide.
 app.post("/:id/moderation", zValidator("json", moderationSchema), async (c) => {

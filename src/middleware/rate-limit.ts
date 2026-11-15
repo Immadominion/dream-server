@@ -29,9 +29,10 @@ function sweep(now: number): void {
 
 /**
  * The client IP as seen by our trusted proxy. Clients can put anything in
- * X-Forwarded-For; proxies *append*. With N trusted proxy hops (Railway's
- * edge = 1) the real client is the N-th entry from the right — never the
- * left-most, which is attacker-controlled.
+ * X-Forwarded-For; proxies *append* (or, like Railway, overwrite with
+ * "<client>, <edge>"). With N trusted entries counted from the right (Railway
+ * = 2) the real client is the N-th from the right — never the left-most,
+ * which is attacker-controlled when a proxy appends.
  */
 export function clientIp(c: Context, trustedHops = config.TRUSTED_PROXY_HOPS): string {
     const hops = (c.req.header("x-forwarded-for") ?? "")
